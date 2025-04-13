@@ -1,4 +1,5 @@
 import rclpy
+import time
 
 import numpy as np
 from visualization_msgs.msg import Marker
@@ -130,64 +131,94 @@ class LineTrajectory:
         return traj
 
     def publish_start_point(self, duration=0.0, scale=0.1):
-        should_publish = len(self.points) > 0
+        """ Publishes the start point of the trajectory. """
         self.node.get_logger().info("Before Publishing start point")
-        if self.visualize and self.start_pub.get_subscription_count() > 0:
+        # Wait a fraction of a second for subscribers to connect
+        attempts = 0
+        while self.start_pub.get_subscription_count() == 0 and attempts < 5:
+            time.sleep(0.1) # Wait 100ms
+            attempts += 1
+            if attempts > 1:
+                 self.node.get_logger().debug(f"Waiting for start point subscribers (attempt {attempts})...")
+
+        if self.start_pub.get_subscription_count() > 0:
             self.node.get_logger().info("Publishing start point")
             marker = Marker()
             marker.header = self.make_header("/map")
-            marker.ns = self.viz_namespace + "/trajectory"
+            marker.ns = self.viz_namespace
             marker.id = 0
-            marker.type = 2  # sphere
-            marker.lifetime = rclpy.duration.Duration(seconds=duration).to_msg()
-            if should_publish:
-                marker.action = 0
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+
+            if len(self.points) > 0:
                 marker.pose.position.x = self.points[0][0]
                 marker.pose.position.y = self.points[0][1]
+                marker.pose.position.z = 0.0  # Assuming 2D
                 marker.pose.orientation.w = 1.0
-                marker.scale.x = 1.0
-                marker.scale.y = 1.0
-                marker.scale.z = 1.0
+
+                marker.scale.x = scale
+                marker.scale.y = scale
+                marker.scale.z = scale
+
+                marker.color.a = 1.0
                 marker.color.r = 0.0
                 marker.color.g = 1.0
                 marker.color.b = 0.0
-                marker.color.a = 1.0
             else:
-                # delete marker
-                marker.action = 2
+                 # Optionally handle the case where there are no points (e.g., delete marker)
+                 marker.action = Marker.DELETE
+
+            if duration > 0:
+                marker.lifetime = rclpy.duration.Duration(seconds=duration).to_msg()
 
             self.start_pub.publish(marker)
-        elif self.start_pub.get_subscription_count() == 0:
-            self.node.get_logger().info("Not publishing start point, no subscribers")
+        else:
+            self.node.get_logger().warn("Not publishing start point, no subscribers after waiting.")
 
-    def publish_end_point(self, duration=0.0):
-        should_publish = len(self.points) > 1
-        if self.visualize and self.end_pub.get_subscription_count() > 0:
+    def publish_end_point(self, duration=0.0, scale=0.1):
+        """ Publishes the end point of the trajectory. """
+        self.node.get_logger().info("Before Publishing end point")
+        # Wait a fraction of a second for subscribers to connect
+        attempts = 0
+        while self.end_pub.get_subscription_count() == 0 and attempts < 5:
+            time.sleep(0.1) # Wait 100ms
+            attempts += 1
+            if attempts > 1:
+                 self.node.get_logger().debug(f"Waiting for end point subscribers (attempt {attempts})...")
+
+        if self.end_pub.get_subscription_count() > 0:
+            self.node.get_logger().info("Publishing end point")
             marker = Marker()
             marker.header = self.make_header("/map")
-            marker.ns = self.viz_namespace + "/trajectory"
-            marker.id = 1
-            marker.type = 2  # sphere
-            marker.lifetime = rclpy.duration.Duration(seconds=duration).to_msg()
-            if should_publish:
-                marker.action = 0
+            marker.ns = self.viz_namespace
+            marker.id = 1 # Different ID from start point
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+
+            if len(self.points) > 1: # Need at least start and end
                 marker.pose.position.x = self.points[-1][0]
                 marker.pose.position.y = self.points[-1][1]
+                marker.pose.position.z = 0.0  # Assuming 2D
                 marker.pose.orientation.w = 1.0
-                marker.scale.x = 1.0
-                marker.scale.y = 1.0
-                marker.scale.z = 1.0
+
+                marker.scale.x = scale
+                marker.scale.y = scale
+                marker.scale.z = scale
+
+                marker.color.a = 1.0
                 marker.color.r = 1.0
                 marker.color.g = 0.0
                 marker.color.b = 0.0
-                marker.color.a = 1.0
             else:
-                # delete marker
-                marker.action = 2
+                # Optionally handle the case where there are not enough points
+                marker.action = Marker.DELETE
+
+            if duration > 0:
+                marker.lifetime = rclpy.duration.Duration(seconds=duration).to_msg()
 
             self.end_pub.publish(marker)
-        elif self.end_pub.get_subscription_count() == 0:
-            print("Not publishing end point, no subscribers")
+        else:
+            self.node.get_logger().warn("Not publishing end point, no subscribers after waiting.")
 
     def publish_trajectory(self, duration=0.0):
         should_publish = len(self.points) > 1
@@ -220,7 +251,60 @@ class LineTrajectory:
         elif self.traj_pub.get_subscription_count() == 0:
             print("Not publishing trajectory, no subscribers")
 
-    def publish_viz(self, duration=0):
+    def publish_path(self, duration=0.0, scale=0.03):
+        """ Publishes the path of the trajectory. """
+        self.node.get_logger().info("Before Publishing path")
+        # Wait a fraction of a second for subscribers to connect
+        attempts = 0
+        # Use self.viz_path_pub here, matching the publisher name in __init__
+        while self.viz_path_pub.get_subscription_count() == 0 and attempts < 5:
+            time.sleep(0.1) # Wait 100ms
+            attempts += 1
+            if attempts > 1:
+                 self.node.get_logger().debug(f"Waiting for path subscribers (attempt {attempts})...")
+
+        # Use self.viz_path_pub here
+        if self.viz_path_pub.get_subscription_count() > 0:
+            self.node.get_logger().info("Publishing path")
+            marker = Marker()
+            # ... (rest of the marker setup code should be correct from original) ...
+            marker.header.frame_id = self.frame_id
+            marker.header.stamp = self.node.get_clock().now().to_msg()
+            marker.ns = self.viz_namespace
+            marker.id = 2 # Different ID from start/end points
+            marker.type = Marker.LINE_STRIP
+            marker.action = Marker.ADD
+
+            marker.scale.x = scale # Line width
+
+            marker.color.a = 1.0
+            marker.color.r = 0.0
+            marker.color.g = 0.0
+            marker.color.b = 1.0 # Blue path
+
+            marker.points = []
+            if len(self.points) > 1:
+                for p in self.points:
+                    pt_msg = Point()
+                    pt_msg.x = p[0]
+                    pt_msg.y = p[1]
+                    pt_msg.z = 0.0
+                    marker.points.append(pt_msg)
+            else:
+                 # Optionally handle the case where there are not enough points
+                 marker.action = Marker.DELETE
+
+            if duration > 0:
+                 marker.lifetime = rclpy.duration.Duration(seconds=duration).to_msg()
+
+            # Use self.viz_path_pub here
+            self.viz_path_pub.publish(marker)
+        else:
+            # Use self.viz_path_pub here
+            self.node.get_logger().warn("Not publishing path, no subscribers after waiting.")
+
+    def publish_viz(self, duration=0.0):
+        """ Publishes the trajectory visualization markers. """
         if not self.visualize:
             print("Cannot visualize path, not initialized with visualization enabled")
             return
