@@ -6,6 +6,7 @@
         <param from="$(find-pkg-share path_planning)/config/sim/pf_sim_config.yaml"/>
     </node>
     <node pkg="localization" exec="particle_filter" name="particle_filter" output="screen">
-        <param from="$(find-pkg-share path_planning)/config/sim/pf_config.yaml"/>
+      <param from="$(find-pkg-share path_planning)/config/sim/pf_config.yaml"/>
     </node>
+
 </launch>
