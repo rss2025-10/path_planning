@@ -36,7 +36,7 @@ class Node:
         self.steer = steer            # steering angle used (None for RS shortcut)
         self.direction = direction    # +1 for forward, -1 for reverse (None for RS shortcut)
         self.cost = cost              # cumulative cost
-        self.parent_idx = parent_idx  # parent node’s index (tuple)
+        self.parent_idx = parent_idx  # parent node's index (tuple)
 
 
 def _node_index(node):
@@ -58,6 +58,7 @@ class HybridAStarPlanner:
                  cost_direction_change=150,
                  cost_steer_angle=0,
                  cost_steer_angle_change=50,
+                 cost_obstacle_distance=50,
                  cost_hybrid=50):
         """
         Instantiate the planner.
@@ -83,6 +84,7 @@ class HybridAStarPlanner:
         self.cost_direction_change = cost_direction_change
         self.cost_steer_angle = cost_steer_angle
         self.cost_steer_angle_change = cost_steer_angle_change
+        self.cost_obstacle_distance = cost_obstacle_distance
         self.cost_hybrid = cost_hybrid
 
         # These will be set from the occupancy grid.
@@ -90,7 +92,7 @@ class HybridAStarPlanner:
         self.obstacle_y = None
         self.obstacle_tree = None
         # Instead of basing boundaries on extracted obstacles (which may be dummy),
-        # we now set them based on the map’s bounds.
+        # we now set them based on the map's bounds.
         self.map_min_x = None
         self.map_min_y = None
         self.map_max_x = None
@@ -181,7 +183,7 @@ class HybridAStarPlanner:
         if (x < self.map_min_x or x > self.map_max_x or
              y < self.map_min_y or y > self.map_max_y):
              return False
-        return True
+        return not self._collision(traj)
 
     def _simulated_path_cost(self, current_node, motion_cmd, sim_length, goal_node, traj):
         cost = current_node.cost
@@ -207,7 +209,7 @@ class HybridAStarPlanner:
 
     def _kinematic_simulation_node(self, current_node, motion_cmd, goal_node, sim_length=0.0, step=None):
         """
-        Simulates the vehicle’s kinematics for a given motion command.
+        Simulates the vehicle's kinematics for a given motion command.
         A finer simulation step is used for more accurate collision checking.
         """
         if step is None:
