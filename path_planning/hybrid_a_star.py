@@ -181,9 +181,9 @@ class HybridAStarPlanner:
         if (x < self.map_min_x or x > self.map_max_x or
              y < self.map_min_y or y > self.map_max_y):
              return False
-        return not self._collision(traj)
+        return True
 
-    def _simulated_path_cost(self, current_node, motion_cmd, sim_length, goal_node):
+    def _simulated_path_cost(self, current_node, motion_cmd, sim_length, goal_node, traj):
         cost = current_node.cost
         if motion_cmd[1] == 1:
             cost += sim_length
@@ -195,6 +195,14 @@ class HybridAStarPlanner:
         cost += abs(motion_cmd[0] - current_node.steer) * self.cost_steer_angle_change
         cost += self.cost_hybrid
         cost += math.sqrt((current_node.grid_idx[0] - goal_node.grid_idx[0]) ** 2 + (current_node.grid_idx[1] - goal_node.grid_idx[1]) ** 2)
+        
+        # NEW: add a cost term at each simulated pose based on the obstacle distance.
+        # For each point in the trajectory, query the nearest obstacle distance and add a penalty.
+        for pose in traj:
+            # Query returns (distance, index)
+            d, _ = self.obstacle_tree.query([pose[0], pose[1]])
+            # To avoid division by zero, use a minimum distance (here 0.1).
+            cost += self.cost_obstacle_distance / max(d, 0.1)
         return cost
 
     def _kinematic_simulation_node(self, current_node, motion_cmd, goal_node, sim_length=0.0, step=None):
@@ -225,7 +233,7 @@ class HybridAStarPlanner:
                     round(traj[-1][2] / self.yaw_resolution)]
         if not self._is_valid(traj, grid_idx):
            return None
-        cost = self._simulated_path_cost(current_node, motion_cmd, sim_length, goal_node)
+        cost = self._simulated_path_cost(current_node, motion_cmd, sim_length, goal_node, traj)
         return Node(grid_idx, traj, motion_cmd[0], motion_cmd[1], cost, _node_index(current_node))
 
     def _backtrack(self, start_node, goal_node, closed_set):
