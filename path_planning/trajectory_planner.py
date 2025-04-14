@@ -2,9 +2,9 @@
 """
 trajectory_planner.py
 
-A ROS2 node that uses Hybrid A* to plan a path (as a PoseArray)
+A ROS2 node that uses path planning algorithms (Hybrid A* or RRT) to plan a path (as a PoseArray)
 from the current car pose (from /initial_pose_topic or /odom if using ground truth)
-to a goal pose set via RViz (using the “2D Nav Goal” button). 
+to a goal pose set via RViz (using the "2D Nav Goal" button). 
 The planned path, along with start and goal markers, is published for visualization.
 """
 
@@ -16,11 +16,12 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Pose, Pose
 from nav_msgs.msg import OccupancyGrid
 
 # Import our planning libraries and utilities.
-from .hybrid_a_star import HybridAStarPlanner  # Also sets up the grid and vehicle parameters
+from .hybrid_a_star import HybridAStarPlanner  # Hybrid A* implementation
+from .rtt import RRTPlanner  # RRT implementation
 from .utils import LineTrajectory  # Utility for trajectory visualization (publishes markers)
 
 class PathPlan(Node):
-    """Plan a collision free trajectory using Hybrid A* from the current pose to a goal.
+    """Plan a collision free trajectory using path planning algorithms from the current pose to a goal.
     
     The current pose is updated from the /initial_pose_topic (or /odom) and
     the goal pose is set via RViz (publishing to /goal_pose).
@@ -33,11 +34,20 @@ class PathPlan(Node):
         self.declare_parameter('odom_topic', "default")
         self.declare_parameter('map_topic', "default")
         self.declare_parameter('initial_pose_topic', "default")
+        self.declare_parameter('planner_type', "hybrid_a_star")  # Options: "hybrid_a_star" or "rrt"
+        self.declare_parameter('rrt_max_iter', 25000)
+        self.declare_parameter('rrt_goal_sample_rate', 10)
+        self.declare_parameter('rrt_expand_dist', 0.5)
+        self.declare_parameter('use_kinodynamic', True)  # For RRT: whether to use kinodynamic constraints
 
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.map_topic = self.get_parameter('map_topic').get_parameter_value().string_value
-        self.get_logger().info(self.map_topic)
         self.initial_pose_topic = self.get_parameter('initial_pose_topic').get_parameter_value().string_value
+        self.planner_type = self.get_parameter('planner_type').get_parameter_value().string_value
+        self.use_kinodynamic = self.get_parameter('use_kinodynamic').get_parameter_value().bool_value
+
+        self.get_logger().info(f"Using planner type: {self.planner_type}")
+        self.get_logger().info(f"Map topic: {self.map_topic}")
 
         # Subscribe to the map.
         self.map_sub = self.create_subscription(
@@ -73,10 +83,20 @@ class PathPlan(Node):
         # start (sphere), trajectory (line strip) and end (sphere) in RViz.
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
 
-        # Instantiate our Hybrid A* planner.
+        # Instantiate planners
+        
+        # Hybrid A* planner
         self.a_star_planner = HybridAStarPlanner(
             xy_resolution=0.5, 
             yaw_resolution=math.radians(30)
+        )
+        
+        # RRT planner
+        self.rrt_planner = RRTPlanner(
+            xy_resolution=0.5,
+            max_iter=self.get_parameter('rrt_max_iter').get_parameter_value().integer_value,
+            expand_dist=self.get_parameter('rrt_expand_dist').get_parameter_value().double_value,
+            goal_sample_rate=self.get_parameter('rrt_goal_sample_rate').get_parameter_value().integer_value
         )
 
         self.current_pose = None  # This will be set from pose_cb
@@ -86,11 +106,12 @@ class PathPlan(Node):
         Process the OccupancyGrid message from the map.
          • Convert the occupancy grid into lists of obstacles.
          • Compute map bounds.
-         • Pass the map to the Hybrid A* planner.
+         • Pass the map to both planners.
         """
-        self.get_logger().info("Map received. Setting occupancy grid for Hybrid A*.")
+        self.get_logger().info("Map received. Setting occupancy grid for planners.")
         self.get_logger().info(f"{msg.info.origin}")
         self.a_star_planner.set_occupancy_grid(msg)
+        self.rrt_planner.set_occupancy_grid(msg)
         
     def pose_cb(self, msg: PoseWithCovarianceStamped):
         """
@@ -118,7 +139,7 @@ class PathPlan(Node):
         """
         Process the goal pose published by RViz.
         This callback uses the current car pose (from /initial_pose_topic) as the start,
-        then calls Hybrid A* to compute a collision-free path to the new goal.
+        then calls the selected planner to compute a collision-free path to the new goal.
         The result is then published as a PoseArray for visualization.
         """
         if self.current_pose is None:
@@ -136,8 +157,19 @@ class PathPlan(Node):
         self.get_logger().info("Planning from (%.2f, %.2f) to (%.2f, %.2f)" %
                                (start[0], start[1], goal[0], goal[1]))
 
-        # Run the Hybrid A* planning.
-        plan = self.a_star_planner.plan_path(start, goal)
+        # Run the selected planner
+        plan = None
+        
+        if self.planner_type == "hybrid_a_star":
+            self.get_logger().info("Using Hybrid A* planner")
+            plan = self.a_star_planner.plan_path(start, goal)
+        elif self.planner_type == "rrt":
+            self.get_logger().info(f"Using RRT planner (kinodynamic: {self.use_kinodynamic})")
+            plan = self.rrt_planner.plan_path(start, goal, use_kinodynamic=self.use_kinodynamic)
+        else:
+            self.get_logger().error(f"Unknown planner type: {self.planner_type}")
+            return
+            
         if plan:
             x_path, y_path, yaw_path = plan
 
@@ -175,13 +207,50 @@ class PathPlan(Node):
         else:
             self.get_logger().warn("No valid path found!")
 
-    def plan_path(self, start_point, end_point, map_msg):
+    def plan_path(self, start_point, end_point, map_msg, planner_type=None):
         """
         This is a helper if you want to drive the planning externally.
-        Here we simply publish the LineTrajectory visualization.
+        Allows specifying which planner to use.
+        
+        Args:
+            start_point: Start position [x, y, yaw]
+            end_point: Goal position [x, y, yaw]
+            map_msg: OccupancyGrid message
+            planner_type: Optional override of which planner to use
+        
+        Returns:
+            Tuple of (x_path, y_path, yaw_path) if successful, None otherwise
         """
-        self.traj_pub.publish(self.trajectory.toPoseArray())
-        self.trajectory.publish_viz()
+        # Use provided planner type or default to the node's setting
+        planner = planner_type or self.planner_type
+        
+        # Set the occupancy grid if provided
+        if map_msg:
+            if planner == "hybrid_a_star":
+                self.a_star_planner.set_occupancy_grid(map_msg)
+            elif planner == "rrt":
+                self.rrt_planner.set_occupancy_grid(map_msg)
+            
+        # Plan using selected planner
+        plan = None
+        if planner == "hybrid_a_star":
+            plan = self.a_star_planner.plan_path(start_point, end_point)
+        elif planner == "rrt":
+            plan = self.rrt_planner.plan_path(start_point, end_point, use_kinodynamic=self.use_kinodynamic)
+        
+        if plan:
+            x_path, y_path, yaw_path = plan
+            
+            # Update visualization
+            self.trajectory.clear()
+            for x, y in zip(x_path, y_path):
+                self.trajectory.addPoint((x, y))
+            self.trajectory.publish_viz()
+            
+            # Publish as PoseArray
+            self.traj_pub.publish(self.trajectory.toPoseArray())
+            
+        return plan
 
 
 def main(args=None):

@@ -1,0 +1,24 @@
+<launch>
+    <!-- Launch the trajectory planner node with configurable planner type -->
+    <!-- 
+        planner_type: "hybrid_a_star" or "rrt"
+        use_kinodynamic: Whether to use kinodynamic constraints for RRT
+    -->
+    <arg name="planner_type" default="rrt" description="Path planning algorithm to use (hybrid_a_star or rrt)"/>
+    <arg name="use_kinodynamic" default="true" description="Use kinodynamic constraints for RRT (ignored for hybrid_a_star)"/>
+    <arg name="rrt_max_iter" default="1000" description="Maximum iterations for RRT"/>
+    <arg name="rrt_expand_dist" default="0.5" description="Expansion distance for RRT"/>
+    <arg name="rrt_goal_sample_rate" default="10" description="Goal sampling rate for RRT (%)"/>
+
+    <node pkg="path_planning" exec="trajectory_planner" name="trajectory_planner" output="screen">
+        <!-- Load base configuration from YAML file -->
+        <param from="$(find-pkg-share path_planning)/config/sim/sim_config.yaml"/>
+        
+        <!-- Override planner-specific parameters -->
+        <param name="planner_type" value="$(var planner_type)"/>
+        <param name="use_kinodynamic" value="$(var use_kinodynamic)"/>
+        <param name="rrt_max_iter" value="$(var rrt_max_iter)"/>
+        <param name="rrt_expand_dist" value="$(var rrt_expand_dist)"/>
+        <param name="rrt_goal_sample_rate" value="$(var rrt_goal_sample_rate)"/>
+    </node>
+</launch> 
