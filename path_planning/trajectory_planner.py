@@ -18,7 +18,9 @@ from nav_msgs.msg import OccupancyGrid
 # Import our planning libraries and utilities.
 from .hybrid_a_star import HybridAStarPlanner  # Hybrid A* implementation
 from .rtt import RRTPlanner  # RRT implementation
+from .straight_liner import StraightLiner
 from .utils import LineTrajectory  # Utility for trajectory visualization (publishes markers)
+
 
 class PathPlan(Node):
     """Plan a collision free trajectory using path planning algorithms from the current pose to a goal.
@@ -34,7 +36,7 @@ class PathPlan(Node):
         self.declare_parameter('odom_topic', "default")
         self.declare_parameter('map_topic', "default")
         self.declare_parameter('initial_pose_topic', "default")
-        self.declare_parameter('planner_type', "hybrid_a_star")  # Options: "hybrid_a_star" or "rrt"
+        self.declare_parameter('planner_type', "straight_liner")  # Options: "hybrid_a_star" or "rrt"
         self.declare_parameter('rrt_max_iter', 25000)
         self.declare_parameter('rrt_goal_sample_rate', 10)
         self.declare_parameter('rrt_expand_dist', 0.5)
@@ -85,6 +87,9 @@ class PathPlan(Node):
 
         # Instantiate planners
         
+        # Straight liner
+        self.straight_liner = StraightLiner(node=self)
+
         # Hybrid A* planner
         self.a_star_planner = HybridAStarPlanner(
             xy_resolution=0.5, 
@@ -120,8 +125,10 @@ class PathPlan(Node):
         car's estimated (or ground-truth) pose is updated.
         """
         self.current_pose = msg.pose.pose
+        plan = self.straight_liner.set_start_pose(self.current_pose)
         self.get_logger().debug("Updated current pose (x=%.2f, y=%.2f)" %
                                   (self.current_pose.position.x, self.current_pose.position.y))
+        
 
     def get_yaw_from_pose(self, pose: Pose) -> float:
         """
@@ -166,6 +173,9 @@ class PathPlan(Node):
         elif self.planner_type == "rrt":
             self.get_logger().info(f"Using RRT planner (kinodynamic: {self.use_kinodynamic})")
             plan = self.rrt_planner.plan_path(start, goal, use_kinodynamic=self.use_kinodynamic)
+        elif self.planner_type == "straight_liner":
+            self.get_logger().info(f"Using Straight Line Planner")
+            plan = self.straight_liner.set_end_pose(msg.pose)
         else:
             self.get_logger().error(f"Unknown planner type: {self.planner_type}")
             return
